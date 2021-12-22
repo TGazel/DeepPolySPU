@@ -1,50 +1,56 @@
-# RIAI 2021 Course Project
+# RIAI 2021 Project Report 
 
+This report documents and explains on a high-level our solution to
+building a verifier for SPU activation with DeepPoly, in the framework of the RTAI course.  
 
+The authors of this solution are 
+Ghjulia Sialelli, Kouroche Bouchiat and Thomas Gazel-Anthoine.
 
-## Folder structure
-In the directory `code` you can find 2 files. 
-File `networks.py` contains encoding of fully connected neural network architectures as PyTorch classes.
-The architectures extend `nn.Module` object and consist of standard PyTorch layers and a new SPU activation function. Please note that first layer of each network performs normalization of the input image.
-File `verifier.py` contains a template of verifier. Loading of the stored networks and test cases is already implemented in `main` function. If you decide to modify `main` function, please ensure that parsing of the test cases works correctly. Your task is to modify `analyze` function by building upon DeepPoly convex relaxation. Note that provided verifier template is guaranteed to achieve **0** points (by always outputting `not verified`).
+## Solution structure
 
-In folder `mnist_nets` you can find 10 neural networks (total of 5 architectures and 2 different models per architecture). These networks are loaded using PyTorch in `verifier.py`.
-In folder `test_cases` you can find 10 subfolders. Each subfolder is associated with one of the networks, using the same name. In a subfolder corresponding to a network, you can find 2 test cases for this network. 
-As explained in the lecture, these test cases **are not** part of the set of test cases which we will use for the final evaluation. 
+The file `DeepPoly.py` contains the encoding of DeepPoly 
+using a neural network architecture with PyTorch.
+DP_Shape objects store DeepPoly constraints and bounds and are 
+the objects on which the neural network operates. 
+DeepPoly transformers for Linear, Flatten, Normalization, ReLU and SPU layers 
+are built as `nn.Module`. 
 
-## Setup instructions
+The chosen shape for the DeepPoly transformation of the SPU layer is described and can be interacted with 
+in the `DP_SPU.ggb` GeoGebra file. Three of the constraints boundaries are parametrized 
+(upper constraint in the case u<0, lower constraint in the case l>0 and the crossing case).
+These parameters can be modified in the GeoGebra file and are optimized in our solution.
+While in the code the parameters are not restricted in range to avoid gradient problems, in GeoGebra they are in the [0,1] range for readabilty.
 
-We recommend you to install Python virtual environment to ensure dependencies are same as the ones we will use for evaluation.
-To evaluate your solution, we are going to use Python 3.7.
-You can create virtual environment and install the dependencies using the following commands:
+To verify the output of some neural network and some input under a given perturbation a DP_verifier is built,
+consisting of a DP_net, the abstract twin of the neural network, and a final layer 
+that pits output nodes against the true label to check the property is verified.
+DP_net transforms the shape described by the input and the perturbation (and by clamping in the MNIST input [0,1] range) 
+by passing it through the network and running back substitution before every non-exact (i.e. SPU) transformers 
+to achieve the best bounds before applying the transformer.
+The network has 3 parameters for each SPU node. The parameters are optimized, using a constant learning rate and a simple loss that focuses only on the worst violation of the property, by the verifier 
+until the output is verified, immediately outputting verified, or the maximum number of epochs is reached, in which case it outputs not verified. 
+Note that given the definition of the parameters, no more than one parameter per node will be updated at each iteration.
 
-```bash
-$ virtualenv venv --python=python3.7
-$ source venv/bin/activate
-$ pip install -r requirements.txt
-```
+## Further work
 
-## Running the verifier
+We have identified some aspects that may be modified and some possible extensions for our solution:
+<ul>
+<li> The maximum number of epochs we fix is 1000, which on the test example leaves us well below the one minute limit for our machines.
+This limit may be increased, and even set to infinity since we may abuse the project guideline that 
+specify that if runtime limit is reached, the output is automatically set to not verified. This would have the advantage 
+to use the entirety of the ressources. We decided against that.</li>
+<li> The specified loss may not be the best for the task, since it does not consider output node in isolation
+and may in rare cases stay stuck in a situation where improving one output worsens another. 
+Additionally, the constant learning rate may not be optimal for such situations. Note also that the initialization is random 
+in our solution, but a more educated guess may allow for slightly lower running time.</li>
+<li> While the three parameters almost cover all possible non-dominated (in an inclusion sense) shapes 
+and the network can thus in theory choose between all possible optimal shapes, 
+there is a small case (when 0&lt;u&lt; sqrt(0.5)) where the upper constraint 
+is neither optimal nor parametrized. There exist in this specific case non-dominated shapes the network
+does not have access to. We considered this situation not important, since it does not occur often and should not drastically reduce verifier performance. 
+</li>
+<li> To avoid NaN in the network optimization, division have additional 1e-6 terms to avoid division by 0. 
+While for the test cases the given simple networks should not have this problem (in particular there are no situation where u=l),
+one may want to replace such solution with proper check and case handling.</li>
+</ul>
 
-We will run your verifier from `code` directory using the command:
-
-```bash
-$ python verifier.py --net {net} --spec ../test_cases/{net}/img{test_idx}_{eps}.txt
-```
-
-In this command, `{net}` is equal to one of the following values (each representing one of the networks we want to verify): `net0_fc1, net1_fc1, net0_fc2, net1_fc2, net0_fc3, net1_fc3, net0_fc4, net1_fc4, net0_fc5, net1_fc5`.
-`test_idx` is an integer representing index of the test case, while `eps` is perturbation that verifier should certify in this test case.
-
-To test your verifier, you can run for example:
-
-```bash
-$ python verifier.py --net net0_fc1 --spec ../test_cases/net0_fc1/example_img0_0.01800.txt
-```
-
-To evaluate the verifier on all networks and sample test cases, we provide the evaluation script.
-You can run this script using the following commands:
-
-```bash
-chmod +x evaluate
-./evaluate
-```
